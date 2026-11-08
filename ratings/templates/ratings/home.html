@@ -1,0 +1,126 @@
+{% extends 'ratings/base.html' %}
+{% load static %}
+
+{% block head %}
+    <meta name="csrf-token" content="{{ csrf_token }}">
+{% endblock %}
+
+{% block content %}
+<div id="ratings-app"
+     data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}"
+     data-my-ratings-url="{% url 'my-ratings' %}"
+        data-add-restaurant-url="{% url 'add-restaurant' %}"
+     data-restaurant-ratings-url="{% url 'list-all-ratings' restaurant_id=0 %}"
+     data-submit-rating-url="{% url 'submit-rating' restaurant_id=0 %}">
+    <section class="hero" aria-labelledby="hero-title">
+        <div>
+            <p class="eyebrow">Your table. Your take.</p>
+            <h1 id="hero-title">A little taste<br>of <em>your world.</em></h1>
+            <p class="hero-description">Keep track of the places you try. Rate the details that matter.<br class="desktop-break"> Find out what everyone else thinks.</p>
+        </div>
+        <div class="hero-stamp" aria-hidden="true">
+            <span class="stamp-star">✳</span>
+            <span>Five little scores.<br>One big impression.</span>
+            <span class="stamp-bottom">OUT OF 100</span>
+        </div>
+    </section>
+
+    {% if not user.is_authenticated %}
+    <aside class="sign-in-notice">
+        <div><strong>Your next great meal starts here.</strong><p>Sign in with a local Django account to load and save ratings.</p></div>
+        <a class="button" href="{% url 'login' %}">Let’s sign in <span aria-hidden="true">→</span></a>
+    </aside>
+    {% endif %}
+    <noscript><p class="notice notice-error">Enable JavaScript to query and save ratings.</p></noscript>
+    <div id="app-status" class="notice" role="status" aria-live="polite" hidden></div>
+
+    <section class="stats-strip" aria-label="Your rating summary">
+        <div><span class="stat-label">Places you’ve rated</span><strong id="stat-count">—</strong></div>
+        <div><span class="stat-label">Your average score</span><strong><span id="stat-average">—</span><small> / 100</small></strong></div>
+        <div><span class="stat-label">Your highest score</span><strong><span id="stat-best">—</span><small> / 100</small></strong></div>
+    </section>
+
+    <div class="dashboard-grid">
+        <section class="panel rating-panel" aria-labelledby="rating-title">
+            <div class="section-heading">
+                <div><p class="eyebrow">01 / Your impression</p><h2 id="rating-title">Rate a place</h2></div>
+                <span class="section-icon" aria-hidden="true">✳</span>
+            </div>
+            <p class="section-description">Five categories. A score from 1 to 20 for each.</p>
+            <form id="rating-form">
+                <fieldset {% if not user.is_authenticated %}disabled{% endif %}>
+                    <legend class="sr-only">Restaurant and category scores</legend>
+                    <label class="input-label" for="rating-restaurant-id">Restaurant ID</label>
+                    <input id="rating-restaurant-id" name="restaurant_id" type="number" min="1" max="9007199254740991" step="1" placeholder="e.g. 42" required>
+                    <p class="input-help">Use an existing restaurant ID, or add a restaurant first with the form beside this one.</p>
+                    <div class="score-fields">
+                        {% for key, label, description in categories %}
+                        <div class="score-field">
+                            <div class="score-heading">
+                                <label for="score-{{ key }}">{{ label }}<span>{{ description }}</span></label>
+                                <div class="score-value"><output id="output-{{ key }}" for="score-{{ key }}">15</output><span> / 20</span></div>
+                            </div>
+                            <input id="score-{{ key }}" name="{{ key }}" type="range" min="1" max="20" step="1" value="15" style="--range-progress: 73.68%">
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="rating-total"><div><span class="eyebrow">Your total</span><p>The sum of all five scores.</p></div><strong><output id="rating-total">75</output><small> / 100</small></strong></div>
+                    <button id="save-rating" class="button button-wide" type="submit">Save my rating <span aria-hidden="true">→</span></button>
+                    <p class="form-footnote">Already rated this ID? Saving updates your existing rating.</p>
+                </fieldset>
+            </form>
+        </section>
+
+        <div class="right-column">
+            <section class="panel" aria-labelledby="add-restaurant-title">
+                <div class="section-heading">
+                    <div><p class="eyebrow">02 / A new place</p><h2 id="add-restaurant-title">Add a restaurant</h2></div>
+                    <span class="section-icon" aria-hidden="true">+</span>
+                </div>
+                <p class="section-description">Create a place first, then use its ID to leave your impression.</p>
+                <form id="add-restaurant-form">
+                    <fieldset {% if not user.is_authenticated %}disabled{% endif %}>
+                        <legend class="sr-only">New restaurant details</legend>
+                        <label class="input-label" for="restaurant-name">Restaurant name</label>
+                        <input id="restaurant-name" name="name" type="text" maxlength="200" placeholder="e.g. The Green Table" required>
+                        <label class="input-label location-label" for="restaurant-country">Country</label>
+                        <input id="restaurant-country" name="country" type="text" maxlength="100" autocomplete="country-name" placeholder="e.g. United Kingdom" required>
+                        <label class="input-label location-label" for="restaurant-city">City</label>
+                        <input id="restaurant-city" name="city" type="text" maxlength="100" autocomplete="address-level2" placeholder="e.g. London" required>
+                        <button id="add-restaurant-button" class="button button-wide" type="submit">Add restaurant <span aria-hidden="true">→</span></button>
+                    </fieldset>
+                </form>
+                <p id="add-restaurant-result" class="input-help" role="status" aria-live="polite">The database assigns an ID. Adding a place doesn’t save a rating.</p>
+            </section>
+
+            <section class="panel" aria-labelledby="my-ratings-title">
+                <div class="section-heading">
+                    <div><p class="eyebrow">03 / Your collection</p><h2 id="my-ratings-title">The places you’ve tried</h2></div>
+                    <button id="refresh-ratings" class="icon-button" type="button" aria-label="Refresh your ratings" {% if not user.is_authenticated %}disabled{% endif %}>↻</button>
+                </div>
+                <div id="my-ratings" class="ratings-list" aria-live="polite" aria-busy="false">
+                    <div class="empty-state"><span aria-hidden="true">↗</span><h3>{% if user.is_authenticated %}Ready to load your ratings{% else %}Your collection lives here{% endif %}</h3><p>{% if user.is_authenticated %}Connecting to your local backend…{% else %}Sign in to see the places you’ve rated.{% endif %}</p></div>
+                </div>
+            </section>
+
+            <section class="panel" aria-labelledby="lookup-title">
+                <div class="section-heading"><div><p class="eyebrow">04 / Around the table</p><h2 id="lookup-title">What’s the word?</h2></div><span class="section-icon" aria-hidden="true">↗</span></div>
+                <p class="section-description">Look up everyone’s ratings for a restaurant.</p>
+                <form id="lookup-form" class="lookup-form">
+                    <fieldset {% if not user.is_authenticated %}disabled{% endif %}>
+                        <legend class="sr-only">Find restaurant ratings</legend>
+                        <label class="input-label" for="lookup-restaurant-id">Restaurant ID</label>
+                        <div class="input-row">
+                            <input id="lookup-restaurant-id" name="restaurant_id" type="number" min="1" max="9007199254740991" step="1" placeholder="e.g. 42" required>
+                            <button id="lookup-button" class="button" type="submit">Look up</button>
+                        </div>
+                    </fieldset>
+                </form>
+                <div id="restaurant-ratings" class="lookup-results" aria-live="polite" aria-busy="false"><p class="input-help">Enter an ID to see real ratings from the backend. No sample data.</p></div>
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="{% static 'ratings/app.js' %}" defer></script>{% endblock %}

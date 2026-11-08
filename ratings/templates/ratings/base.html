@@ -1,0 +1,42 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#234b3d">
+    <title>{% block title %}Koala · A little taste of your world{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="{% static 'ratings/favicon.svg' %}">
+    <link rel="stylesheet" href="{% static 'ratings/app.css' %}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+        <div class="header-inner">
+            <a class="brand" href="{% url 'home' %}" aria-label="Koala home">
+                <span class="brand-mark" aria-hidden="true">k.</span>
+                <span>koala<span class="brand-dot">.</span></span>
+            </a>
+            <nav class="header-actions" aria-label="Main navigation">
+                <span class="local-badge"><span aria-hidden="true"></span> Local edition</span>
+                {% if user.is_authenticated %}
+                    <span class="user-name">{{ user.get_username }}</span>
+                    <form method="post" action="{% url 'logout' %}">
+                        {% csrf_token %}
+                        <button class="button button-small button-quiet" type="submit">Sign out</button>
+                    </form>
+                {% else %}
+                    <a class="button button-small" href="{% url 'login' %}">Sign in <span aria-hidden="true">↗</span></a>
+                {% endif %}
+            </nav>
+        </div>
+    </header>
+    <main id="main" class="page-shell">{% block content %}{% endblock %}</main>
+    <footer class="site-footer page-shell">
+        <span>Good places deserve to be remembered.</span>
+        <span>Koala / local prototype</span>
+    </footer>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

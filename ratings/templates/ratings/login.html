@@ -1,0 +1,23 @@
+{% extends 'ratings/base.html' %}
+{% block title %}Sign in · Koala{% endblock %}
+{% block content %}
+<section class="login-layout" aria-labelledby="login-title">
+    <div class="login-intro"><p class="eyebrow">A seat at the table</p><h1>Your taste.<br><em>Your collection.</em></h1><p class="hero-description">Sign in and pick up where your last meal left off.</p></div>
+    <div class="panel login-panel">
+        <h2 id="login-title">Welcome back.</h2>
+        <p class="section-description">Use your local Django account.</p>
+        {% if form.errors %}<div class="notice notice-error" role="alert">Sign-in failed. Check your username and password and try again.</div>{% endif %}
+        <form method="post" action="{% url 'login' %}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next }}">
+            <label class="input-label" for="id_username">Username</label>
+            <input id="id_username" name="username" type="text" value="{{ form.username.value|default_if_none:'' }}" autocomplete="username" maxlength="150" autocapitalize="none" required autofocus>
+            <label class="input-label" for="id_password">Password</label>
+            <input id="id_password" name="password" type="password" autocomplete="current-password" required>
+            <button class="button button-wide" type="submit">Sign in <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="form-footnote">No account yet? Create one with Django’s createsuperuser command. This local prototype doesn’t include registration.</p>
+        <a class="text-link" href="{% url 'home' %}">← Back to Koala</a>
+    </div>
+</section>
+{% endblock %}
