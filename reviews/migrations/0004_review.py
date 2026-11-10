@@ -5,7 +5,7 @@ CATEGORIES = ('food', 'drink', 'service', 'vibes', 'value')
 
 
 class Migration(migrations.Migration):
-    dependencies = [('ratings', '0003_restaurant_location')]
+    dependencies = [('reviews', '0003_restaurant_location')]
 
     operations = [
         migrations.RenameModel(old_name='Rating', new_name='Review'),

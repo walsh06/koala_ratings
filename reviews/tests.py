@@ -4,12 +4,63 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models.deletion import ProtectedError
-from django.test import Client, TestCase, TransactionTestCase
-from django.urls import reverse
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase
+from django.urls import Resolver404, resolve, reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from .models import Restaurant, Review
+from .views import list_all_reviews, list_my_reviews, submit_review
+
+
+class ReviewURLTests(SimpleTestCase):
+    def test_review_urls_reverse_to_exact_paths(self):
+        cases = (
+            ('my-reviews', {}, '/api/me/reviews/'),
+            (
+                'list-all-reviews', {'restaurant_id': 42},
+                '/api/restaurants/42/reviews/all/',
+            ),
+            (
+                'submit-review', {'restaurant_id': 42},
+                '/api/restaurants/42/submit-review/',
+            ),
+        )
+        for name, kwargs, expected_path in cases:
+            with self.subTest(name=name):
+                self.assertEqual(reverse(name, kwargs=kwargs), expected_path)
+
+    def test_review_urls_resolve_to_expected_callbacks(self):
+        cases = (
+            ('/api/me/reviews/', 'my-reviews', list_my_reviews, {}),
+            (
+                '/api/restaurants/42/reviews/all/', 'list-all-reviews',
+                list_all_reviews, {'restaurant_id': 42},
+            ),
+            (
+                '/api/restaurants/42/submit-review/', 'submit-review',
+                submit_review, {'restaurant_id': 42},
+            ),
+        )
+        for path, name, callback, kwargs in cases:
+            with self.subTest(path=path):
+                match = resolve(path)
+                self.assertIs(match.func, callback)
+                self.assertEqual(match.url_name, name)
+                self.assertEqual(match.kwargs, kwargs)
+                self.assertEqual(match.func.__module__, 'reviews.views')
+
+    def test_legacy_review_urls_do_not_resolve(self):
+        legacy = 'rat' + 'ing'
+        paths = (
+            f'/api/me/{legacy}s/',
+            f'/api/restaurants/42/{legacy}s/all/',
+            f'/api/restaurants/42/submit-{legacy}/',
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                with self.assertRaises(Resolver404):
+                    resolve(path)
 
 
 class ReviewTests(APITestCase):
@@ -29,7 +80,7 @@ class ReviewTests(APITestCase):
         self.assertTrue(
             self.client.login(username='tester', password='test-only-password')
         )
-        self.url = reverse('submit-rating', kwargs={'restaurant_id': 42})
+        self.url = reverse('submit-review', kwargs={'restaurant_id': 42})
         self.scores = {
             'food': 18,
             'drink': 15,
@@ -46,7 +97,7 @@ class ReviewTests(APITestCase):
             {'username': 'tester', 'password': 'test-only-password'},
         )
 
-        self.assertRedirects(response, reverse('my-ratings'))
+        self.assertRedirects(response, reverse('my-reviews'))
 
     def test_login_preserves_explicit_next_destination(self):
         self.client.logout()
@@ -86,7 +137,7 @@ class ReviewTests(APITestCase):
         original_review.refresh_from_db()
         self.assertEqual(original_review.food, 20)
         self.assertEqual(original_review.drink, self.scores['drink'])
-        listed = self.client.get(reverse('my-ratings'))
+        listed = self.client.get(reverse('my-reviews'))
         self.assertEqual(listed.status_code, status.HTTP_200_OK)
         self.assertEqual(
             listed.data,
@@ -101,7 +152,7 @@ class ReviewTests(APITestCase):
         Review.objects.create(user=self.user, restaurant_id=42, **scores)
 
         response = self.client.get(
-            reverse('my-ratings'), {'user_id': other_user.pk}
+            reverse('my-reviews'), {'user_id': other_user.pk}
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -117,7 +168,7 @@ class ReviewTests(APITestCase):
         other_user = get_user_model().objects.create_user(username='other')
         Review.objects.create(user=other_user, restaurant_id=42, **self.scores)
 
-        response = self.client.get(reverse('my-ratings'))
+        response = self.client.get(reverse('my-reviews'))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data, [])
@@ -126,7 +177,7 @@ class ReviewTests(APITestCase):
         Review.objects.create(user=self.user, restaurant_id=42, **self.scores)
         self.client.logout()
 
-        response = self.client.get(reverse('my-ratings'))
+        response = self.client.get(reverse('my-reviews'))
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.assertNotIn('scores', response.data)
@@ -153,7 +204,7 @@ class ReviewTests(APITestCase):
 
     def test_different_restaurants_have_separate_reviews(self):
         self.client.post(self.url, self.scores, format='json')
-        other_url = reverse('submit-rating', kwargs={'restaurant_id': 43})
+        other_url = reverse('submit-review', kwargs={'restaurant_id': 43})
 
         response = self.client.post(other_url, self.scores, format='json')
 
@@ -245,7 +296,7 @@ class ReviewTests(APITestCase):
         self.client.post(self.url, self.scores, format='json')
         for restaurant_id in (0, 123456, 2**63 - 1, 2**63, 10**100):
             with self.subTest(restaurant_id=restaurant_id):
-                url = reverse('submit-rating', kwargs={'restaurant_id': restaurant_id})
+                url = reverse('submit-review', kwargs={'restaurant_id': restaurant_id})
                 response = self.client.post(url, self.scores, format='json')
                 self.assertEqual(response.status_code, 404)
                 self.assertEqual(response.data, {'detail': 'Restaurant not found.'})
@@ -253,14 +304,14 @@ class ReviewTests(APITestCase):
                 self.assertEqual(Review.objects.get().food, 18)
                 self.assertEqual(Restaurant.objects.count(), 3)
                 lookup = self.client.get(reverse(
-                    'list-all-ratings', kwargs={'restaurant_id': restaurant_id},
+                    'list-all-reviews', kwargs={'restaurant_id': restaurant_id},
                 ))
                 self.assertEqual(lookup.status_code, 404)
                 self.assertEqual(lookup.data, {'detail': 'Restaurant not found.'})
 
     def test_restaurant_existence_is_checked_before_score_validation(self):
         response = self.client.post(
-            reverse('submit-rating', kwargs={'restaurant_id': 123456}),
+            reverse('submit-review', kwargs={'restaurant_id': 123456}),
             {}, format='json',
         )
         self.assertEqual(response.status_code, 404)
@@ -268,7 +319,7 @@ class ReviewTests(APITestCase):
 
     def test_existing_restaurant_without_reviews_returns_empty_array(self):
         response = self.client.get(reverse(
-            'list-all-ratings', kwargs={'restaurant_id': 42},
+            'list-all-reviews', kwargs={'restaurant_id': 42},
         ))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [])
@@ -359,7 +410,7 @@ class RestaurantTests(APITestCase):
 
     def test_created_restaurant_can_be_reviewed_and_updated(self):
         created = self.client.post(self.url, self.details, format='json')
-        url = reverse('submit-rating', kwargs={'restaurant_id': created.data['id']})
+        url = reverse('submit-review', kwargs={'restaurant_id': created.data['id']})
         scores = dict.fromkeys(('food', 'drink', 'service', 'vibes', 'value'), 15)
         first = self.client.post(url, scores, format='json')
         self.assertEqual(first.status_code, 200)
@@ -403,6 +454,106 @@ class RestaurantTests(APITestCase):
                 self.assertEqual(restaurant.city, city)
 
 
+class GetRestaurantsTests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user(username='explorer-tester')
+        other = get_user_model().objects.create_user(username='community-reviewer')
+        cls.reviewed = Restaurant.objects.create(
+            name='The Green Table', country='United Kingdom', city='London',
+        )
+        cls.unreviewed = Restaurant.objects.create(
+            name='An Untried Place', country='United Kingdom', city='York',
+        )
+        cls.overseas = Restaurant.objects.create(
+            name='Another Table', country='Canada', city='London',
+        )
+        categories = ('food', 'drink', 'service', 'vibes', 'value')
+        Review.objects.create(
+            user=cls.user, restaurant=cls.reviewed, **dict.fromkeys(categories, 18),
+        )
+        Review.objects.create(
+            user=other, restaurant=cls.reviewed, **dict.fromkeys(categories, 16),
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse('get-restaurants')
+
+    def test_returns_restaurant_details_and_community_averages(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(self.url, '/api/restaurants/get/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        reviewed = next(row for row in response.data if row['id'] == self.reviewed.pk)
+        self.assertEqual(reviewed, {
+            'id': self.reviewed.pk,
+            'name': 'The Green Table',
+            'city': 'London',
+            'country': 'United Kingdom',
+            'total_reviews': 2,
+            'average_score': {
+                'food_avg': 17.0, 'drink_avg': 17.0, 'service_avg': 17.0,
+                'vibes_avg': 17.0, 'value_avg': 17.0,
+            },
+            'total_average': 85.0,
+            'koalas': 2,
+        })
+
+    def test_restaurants_without_reviews_have_null_category_averages(self):
+        response = self.client.get(self.url, {'city': 'York'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        restaurant = response.data[0]
+        self.assertEqual(restaurant['id'], self.unreviewed.pk)
+        self.assertEqual(restaurant['total_reviews'], 0)
+        self.assertEqual(restaurant['total_average'], 0)
+        self.assertEqual(restaurant['koalas'], 0)
+        self.assertEqual(restaurant['average_score'], {
+            'food_avg': None, 'drink_avg': None, 'service_avg': None,
+            'vibes_avg': None, 'value_avg': None,
+        })
+
+    def test_location_filters_apply_individually_and_together(self):
+        cases = (
+            ({'city': 'London'}, {self.reviewed.pk, self.overseas.pk}),
+            ({'country': 'United Kingdom'}, {self.reviewed.pk, self.unreviewed.pk}),
+            ({'city': 'London', 'country': 'Canada'}, {self.overseas.pk}),
+            ({'city': 'York', 'country': 'Canada'}, set()),
+        )
+        for filters, expected_ids in cases:
+            with self.subTest(filters=filters):
+                response = self.client.get(self.url, filters)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual({row['id'] for row in response.data}, expected_ids)
+
+    def test_count_limits_filtered_results_and_accepts_zero(self):
+        for count in (0, 1, 10):
+            with self.subTest(count=count):
+                response = self.client.get(self.url, {
+                    'country': 'United Kingdom', 'count': count,
+                })
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(len(response.data), min(count, 2))
+                self.assertTrue(all(row['country'] == 'United Kingdom' for row in response.data))
+
+    def test_anonymous_requests_are_rejected(self):
+        self.client.force_authenticate(user=None)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_post_is_not_supported_and_does_not_change_data(self):
+        response = self.client.post(self.url, {}, format='json')
+
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(Restaurant.objects.count(), 3)
+        self.assertEqual(Review.objects.count(), 2)
+
+
 class FrontendTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -427,9 +578,9 @@ class FrontendTests(TestCase):
         response = self.client.get(reverse('home'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'ratings/home.html')
-        self.assertContains(response, '/static/ratings/app.css')
-        self.assertContains(response, '/static/ratings/app.js')
+        self.assertTemplateUsed(response, 'reviews/home.html')
+        self.assertContains(response, '/static/reviews/app.css')
+        self.assertContains(response, '/static/reviews/app.js')
         self.assertContains(response, 'data-authenticated="false"')
         self.assertContains(response, 'Sign in to see the places')
         self.assertContains(response, '<fieldset disabled>', count=3)
@@ -441,28 +592,142 @@ class FrontendTests(TestCase):
         response = self.client.get(reverse('home'))
 
         self.assertContains(response, 'data-authenticated="true"')
-        self.assertContains(response, reverse('my-ratings'))
+        self.assertContains(response, f'data-my-reviews-url="{reverse("my-reviews")}"')
         self.assertContains(response, f'data-add-restaurant-url="{reverse("add-restaurant")}"')
         self.assertContains(response, 'id="restaurant-name"')
         self.assertContains(response, 'id="restaurant-country"')
         self.assertContains(response, 'id="restaurant-city"')
         self.assertContains(
-            response, reverse('list-all-ratings', kwargs={'restaurant_id': 0})
+            response,
+            'data-restaurant-reviews-url="'
+            f'{reverse("list-all-reviews", kwargs={"restaurant_id": 0})}"',
         )
         self.assertContains(
-            response, reverse('submit-rating', kwargs={'restaurant_id': 0})
+            response,
+            'data-submit-review-url="'
+            f'{reverse("submit-review", kwargs={"restaurant_id": 0})}"',
         )
         for category in self.scores:
             self.assertContains(response, f'id="score-{category}"')
         self.assertNotContains(response, '<fieldset disabled>')
 
+    def test_home_uses_review_namespace_without_legacy_wording(self):
+        for authenticated in (False, True):
+            with self.subTest(authenticated=authenticated):
+                if authenticated:
+                    self.client.force_login(self.user)
+                else:
+                    self.client.logout()
+                response = self.client.get(reverse('home'))
+
+                self.assertEqual(response.status_code, 200)
+                self.assertTemplateUsed(response, 'reviews/home.html')
+                self.assertTemplateUsed(response, 'reviews/base.html')
+                self.assertContains(response, 'id="reviews-app"', count=1)
+                self.assertContains(
+                    response, f'data-my-reviews-url="{reverse("my-reviews")}"',
+                )
+                self.assertContains(
+                    response,
+                    'data-restaurant-reviews-url="'
+                    f'{reverse("list-all-reviews", kwargs={"restaurant_id": 0})}"',
+                )
+                self.assertContains(
+                    response,
+                    'data-submit-review-url="'
+                    f'{reverse("submit-review", kwargs={"restaurant_id": 0})}"',
+                )
+                self.assertContains(
+                    response, '<link rel="stylesheet" href="/static/reviews/app.css">',
+                )
+                self.assertContains(
+                    response, '<script src="/static/reviews/app.js" defer></script>',
+                )
+                for element_id in (
+                    'review-title', 'review-form', 'review-restaurant-id',
+                    'review-total', 'save-review', 'my-reviews-title',
+                    'refresh-reviews', 'my-reviews', 'restaurant-reviews',
+                ):
+                    self.assertContains(response, f'id="{element_id}"', count=1)
+                self.assertContains(response, 'class="panel review-panel"')
+                self.assertContains(response, 'class="reviews-list"')
+                markup = response.content.decode(response.charset).lower()
+                self.assertNotIn('rat' + 'ing', markup)
+                self.assertNotRegex(markup, r'\brate(?:d|s)?\b')
+
     def test_login_page_is_public_and_renders_custom_form(self):
         response = self.client.get(reverse('login'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, 'ratings/login.html')
+        self.assertTemplateUsed(response, 'reviews/login.html')
         self.assertContains(response, 'autocomplete="current-password"')
         self.assertIn('csrftoken', response.cookies)
+
+    def test_restaurant_explorer_is_public_and_does_not_query_restaurants(self):
+        with self.assertNumQueries(0):
+            response = self.client.get(reverse('restaurants'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(reverse('restaurants'), '/restaurants/')
+        self.assertTemplateUsed(response, 'reviews/restaurants.html')
+        self.assertTemplateUsed(response, 'reviews/base.html')
+        self.assertContains(response, '/static/reviews/app.css')
+        self.assertContains(response, '/static/reviews/restaurants.js')
+        self.assertNotContains(response, '/static/reviews/app.js')
+        self.assertContains(response, 'data-authenticated="false"')
+        self.assertContains(response, '<fieldset disabled>', count=1)
+        self.assertContains(response, 'Sign in to explore')
+        self.assertContains(response, f'{reverse("login")}?next={reverse("restaurants")}')
+        self.assertNotContains(response, 'Place 42')
+
+    def test_authenticated_restaurant_explorer_wires_filters_and_response(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse('restaurants'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-authenticated="true"')
+        self.assertContains(response, f'data-restaurants-url="{reverse("get-restaurants")}"')
+        self.assertNotContains(response, '<fieldset disabled>')
+        self.assertNotContains(response, 'Sign in to explore')
+        for element_id in (
+            'restaurants-form', 'filter-city', 'filter-country', 'filter-count',
+            'restaurants-request-url', 'restaurants-results',
+            'restaurants-response-meta', 'restaurants-response-body',
+        ):
+            self.assertContains(response, f'id="{element_id}"', count=1)
+        self.assertContains(response, 'No request sent yet.')
+
+    def test_frontend_navigation_links_both_pages_and_marks_current_page(self):
+        for page in ('home', 'restaurants', 'login'):
+            with self.subTest(page=page):
+                response = self.client.get(reverse(page))
+                self.assertContains(response, f'href="{reverse("home")}"')
+                self.assertContains(response, f'href="{reverse("restaurants")}"')
+                if page != 'login':
+                    self.assertContains(response, f'href="{reverse(page)}" aria-current="page"', count=1)
+
+    def test_frontend_login_can_return_to_restaurant_explorer(self):
+        response = self.client.post(reverse('login'), {
+            'username': self.user.username,
+            'password': 'test-only-password',
+            'next': reverse('restaurants'),
+        })
+
+        self.assertRedirects(response, reverse('restaurants'))
+
+    def test_explorer_session_can_read_api_without_csrf_or_data_changes(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        client.get(reverse('restaurants'))
+
+        response = client.get(reverse('get-restaurants'), {'city': 'London', 'count': 1})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]['city'], 'London')
+        self.assertEqual(Restaurant.objects.count(), 2)
+        self.assertFalse(Review.objects.exists())
 
     def test_frontend_login_defaults_to_home(self):
         response = self.client.post(
@@ -478,11 +743,11 @@ class FrontendTests(TestCase):
             {
                 'username': self.user.username,
                 'password': 'test-only-password',
-                'next': reverse('my-ratings'),
+                'next': reverse('my-reviews'),
             },
         )
 
-        self.assertRedirects(response, reverse('my-ratings'))
+        self.assertRedirects(response, reverse('my-reviews'))
 
     def test_frontend_login_rejects_external_next_destination(self):
         response = self.client.post(
@@ -521,7 +786,7 @@ class FrontendTests(TestCase):
         client.force_login(self.user)
         home_response = client.get(reverse('home'))
         token = home_response.cookies['csrftoken'].value
-        url = reverse('submit-rating', kwargs={'restaurant_id': 42})
+        url = reverse('submit-review', kwargs={'restaurant_id': 42})
 
         rejected = client.post(url, self.scores, content_type='application/json')
         self.assertEqual(rejected.status_code, 403)
@@ -549,7 +814,7 @@ class FrontendTests(TestCase):
         response = client.post(reverse('logout'), {'csrfmiddlewaretoken': token})
 
         self.assertRedirects(response, reverse('home'))
-        self.assertEqual(client.get(reverse('my-ratings')).status_code, 403)
+        self.assertEqual(client.get(reverse('my-reviews')).status_code, 403)
 
     def test_restaurant_lookup_includes_other_users_but_not_other_places(self):
         self.client.force_login(self.user)
@@ -559,7 +824,7 @@ class FrontendTests(TestCase):
         Review.objects.create(user=other, restaurant_id=99, **self.scores)
 
         response = self.client.get(
-            reverse('list-all-ratings', kwargs={'restaurant_id': 42})
+            reverse('list-all-reviews', kwargs={'restaurant_id': 42})
         )
 
         self.assertEqual(response.status_code, 200)
@@ -571,7 +836,7 @@ class FrontendTests(TestCase):
 
     def test_anonymous_users_cannot_lookup_restaurant_reviews(self):
         response = self.client.get(
-            reverse('list-all-ratings', kwargs={'restaurant_id': 42})
+            reverse('list-all-reviews', kwargs={'restaurant_id': 42})
         )
 
         self.assertEqual(response.status_code, 403)
@@ -594,7 +859,7 @@ class FrontendTests(TestCase):
         self.assertEqual(created.json()['city'], 'London')
         self.assertFalse(Review.objects.exists())
         saved = client.post(
-            reverse('submit-rating', kwargs={'restaurant_id': created.json()['id']}),
+            reverse('submit-review', kwargs={'restaurant_id': created.json()['id']}),
             self.scores, content_type='application/json', HTTP_X_CSRFTOKEN=token,
         )
         self.assertEqual(saved.status_code, 200)
@@ -602,8 +867,8 @@ class FrontendTests(TestCase):
 
 
 class RestaurantMigrationTests(TransactionTestCase):
-    migrate_from = [('ratings', '0001_initial')]
-    migrate_to = [('ratings', '0002_restaurant')]
+    migrate_from = [('reviews', '0001_initial')]
+    migrate_to = [('reviews', '0002_restaurant')]
 
     def setUp(self):
         # MigrationExecutor always operates on Django's temporary test database.
@@ -613,7 +878,7 @@ class RestaurantMigrationTests(TransactionTestCase):
         old_apps = executor.loader.project_state(self.migrate_from).apps
         user = old_apps.get_model('auth', 'User').objects.create(username='migration-user')
         self.user_pk = user.pk
-        old_review_model = old_apps.get_model('ratings', 'Rating')
+        old_review_model = old_apps.get_model('reviews', 'Rating')
         for restaurant_id in (42, 99):
             old_review_model.objects.create(
                 user_id=user.pk, restaurant_id=restaurant_id,
@@ -629,8 +894,10 @@ class RestaurantMigrationTests(TransactionTestCase):
         executor.migrate(executor.loader.graph.leaf_nodes())
 
     def test_upgrade_discards_only_prototype_reviews_and_keeps_constraints(self):
-        review_model = self.apps.get_model('ratings', 'Rating')
-        restaurant_model = self.apps.get_model('ratings', 'Restaurant')
+        review_model = self.apps.get_model('reviews', 'Rating')
+        restaurant_model = self.apps.get_model('reviews', 'Restaurant')
+        self.assertEqual(review_model._meta.db_table, 'reviews_rating')
+        self.assertEqual(restaurant_model._meta.db_table, 'reviews_restaurant')
         self.assertFalse(review_model.objects.exists())
         self.assertFalse(restaurant_model.objects.exists())
         self.assertTrue(self.apps.get_model('auth', 'User').objects.filter(pk=self.user_pk).exists())
@@ -639,7 +906,7 @@ class RestaurantMigrationTests(TransactionTestCase):
         self.assertTrue(constraints['unique_user_restaurant_rating']['unique'])
         self.assertEqual(set(constraints['unique_user_restaurant_rating']['columns']), {'user_id', 'restaurant_id'})
         self.assertTrue(any(
-            constraint['foreign_key'] == ('ratings_restaurant', 'id')
+            constraint['foreign_key'] == ('reviews_restaurant', 'id')
             for constraint in constraints.values()
         ))
         for category in ('food', 'drink', 'service', 'vibes', 'value'):
@@ -656,25 +923,25 @@ class RestaurantMigrationTests(TransactionTestCase):
 class RestaurantLocationMigrationTests(TransactionTestCase):
     def test_location_upgrade_preserves_restaurants_reviews_and_accounts(self):
         self.addCleanup(RestaurantMigrationTests.restore_latest_schema)
-        old_target = [('ratings', '0002_restaurant')]
-        new_target = [('ratings', '0003_restaurant_location')]
+        old_target = [('reviews', '0002_restaurant')]
+        new_target = [('reviews', '0003_restaurant_location')]
         executor = MigrationExecutor(connection)
         executor.migrate(old_target)
         old_apps = executor.loader.project_state(old_target).apps
         user = old_apps.get_model('auth', 'User').objects.create(username='location-user')
-        restaurant = old_apps.get_model('ratings', 'Restaurant').objects.create(name='Existing place')
-        review = old_apps.get_model('ratings', 'Rating').objects.create(
+        restaurant = old_apps.get_model('reviews', 'Restaurant').objects.create(name='Existing place')
+        review = old_apps.get_model('reviews', 'Rating').objects.create(
             user_id=user.pk, restaurant_id=restaurant.pk,
             food=18, drink=15, service=17, vibes=19, value=16,
         )
         executor = MigrationExecutor(connection)
         executor.migrate(new_target)
         apps = executor.loader.project_state(new_target).apps
-        migrated = apps.get_model('ratings', 'Restaurant').objects.get(pk=restaurant.pk)
+        migrated = apps.get_model('reviews', 'Restaurant').objects.get(pk=restaurant.pk)
         self.assertEqual(migrated.name, 'Existing place')
         self.assertEqual(migrated.country, '')
         self.assertEqual(migrated.city, '')
-        preserved_review = apps.get_model('ratings', 'Rating').objects.get(pk=review.pk)
+        preserved_review = apps.get_model('reviews', 'Rating').objects.get(pk=review.pk)
         self.assertEqual(preserved_review.restaurant_id, restaurant.pk)
         self.assertEqual(preserved_review.user_id, user.pk)
         for category in ('food', 'drink', 'service', 'vibes', 'value'):
@@ -684,8 +951,8 @@ class RestaurantLocationMigrationTests(TransactionTestCase):
 
 
 class ReviewMigrationTests(TransactionTestCase):
-    migrate_from = [('ratings', '0003_restaurant_location')]
-    migrate_to = [('ratings', '0004_review')]
+    migrate_from = [('reviews', '0003_restaurant_location')]
+    migrate_to = [('reviews', '0004_review')]
     categories = ('food', 'drink', 'service', 'vibes', 'value')
 
     def setUp(self):
@@ -701,12 +968,12 @@ class ReviewMigrationTests(TransactionTestCase):
             is_active=True, is_staff=True,
         )
         self.account_values = user_model.objects.values().get(pk=user.pk)
-        restaurant_model = old_apps.get_model('ratings', 'Restaurant')
+        restaurant_model = old_apps.get_model('reviews', 'Restaurant')
         restaurant = restaurant_model.objects.create(
             name='Existing cafe', country='日本', city='東京',
         )
         self.restaurant_values = restaurant_model.objects.values().get(pk=restaurant.pk)
-        old_review_model = old_apps.get_model('ratings', 'Rating')
+        old_review_model = old_apps.get_model('reviews', 'Rating')
         old_review = old_review_model.objects.create(
             user_id=user.pk, restaurant_id=restaurant.pk,
             food=18, drink=15, service=17, vibes=19, value=16,
@@ -726,8 +993,8 @@ class ReviewMigrationTests(TransactionTestCase):
         return executor.loader.project_state(target).apps
 
     def _assert_preserved_data(self, apps, model_name):
-        review_model = apps.get_model('ratings', model_name)
-        restaurant_model = apps.get_model('ratings', 'Restaurant')
+        review_model = apps.get_model('reviews', model_name)
+        restaurant_model = apps.get_model('reviews', 'Restaurant')
         user_model = apps.get_model('auth', 'User')
         self.assertEqual(review_model.objects.count(), 1)
         self.assertEqual(
@@ -744,16 +1011,18 @@ class ReviewMigrationTests(TransactionTestCase):
         )
 
     def _assert_schema(self, apps, model_name, prefix, absent_model_name):
-        review_model = apps.get_model('ratings', model_name)
-        restaurant_model = apps.get_model('ratings', 'Restaurant')
+        review_model = apps.get_model('reviews', model_name)
+        restaurant_model = apps.get_model('reviews', 'Restaurant')
         user_model = apps.get_model('auth', 'User')
         self.assertEqual(review_model._meta.model_name, prefix)
-        self.assertEqual(review_model._meta.db_table, f'ratings_{prefix}')
+        self.assertEqual(review_model._meta.db_table, f'reviews_{prefix}')
+        self.assertEqual(restaurant_model._meta.db_table, 'reviews_restaurant')
         tables = connection.introspection.table_names()
-        self.assertIn(f'ratings_{prefix}', tables)
-        self.assertNotIn(f'ratings_{absent_model_name.lower()}', tables)
+        self.assertIn(f'reviews_{prefix}', tables)
+        self.assertIn('reviews_restaurant', tables)
+        self.assertNotIn(f'reviews_{absent_model_name.lower()}', tables)
         with self.assertRaises(LookupError):
-            apps.get_model('ratings', absent_model_name)
+            apps.get_model('reviews', absent_model_name)
 
         with connection.cursor() as cursor:
             constraints = connection.introspection.get_constraints(
@@ -798,7 +1067,7 @@ class ReviewMigrationTests(TransactionTestCase):
         connection.check_constraints()
 
     def _assert_constraints_are_enforced(self, apps, model_name):
-        review_model = apps.get_model('ratings', model_name)
+        review_model = apps.get_model('reviews', model_name)
         scores = {category: self.review_values[category] for category in self.categories}
         with self.assertRaises(IntegrityError), transaction.atomic():
             review_model.objects.create(

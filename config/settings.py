@@ -41,7 +41,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'ratings',
+    'reviews',
 ]
 
 MIDDLEWARE = [
@@ -56,7 +56,7 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'config.urls'
 
-LOGIN_REDIRECT_URL = 'my-ratings'
+LOGIN_REDIRECT_URL = 'my-reviews'
 
 TEMPLATES = [
     {

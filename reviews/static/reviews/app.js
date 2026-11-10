@@ -1,14 +1,14 @@
 (() => {
     "use strict";
 
-    const app = document.getElementById("ratings-app");
+    const app = document.getElementById("reviews-app");
     if (!app) return;
 
     const categories = ["food", "drink", "service", "vibes", "value"];
     const labels = { food: "Food", drink: "Drink", service: "Service", vibes: "Vibes", value: "Value" };
     const authenticated = app.dataset.authenticated === "true";
     const status = document.getElementById("app-status");
-    const ratingForm = document.getElementById("rating-form");
+    const reviewForm = document.getElementById("review-form");
     const lookupForm = document.getElementById("lookup-form");
     const addRestaurantForm = document.getElementById("add-restaurant-form");
     const addRestaurantButton = document.getElementById("add-restaurant-button");
@@ -16,10 +16,10 @@
     const restaurantCountry = document.getElementById("restaurant-country");
     const restaurantCity = document.getElementById("restaurant-city");
     const addRestaurantResult = document.getElementById("add-restaurant-result");
-    const myRatings = document.getElementById("my-ratings");
-    const restaurantRatings = document.getElementById("restaurant-ratings");
-    const refreshButton = document.getElementById("refresh-ratings");
-    const saveButton = document.getElementById("save-rating");
+    const myReviews = document.getElementById("my-reviews");
+    const restaurantReviews = document.getElementById("restaurant-reviews");
+    const refreshButton = document.getElementById("refresh-reviews");
+    const saveButton = document.getElementById("save-review");
     const lookupButton = document.getElementById("lookup-button");
     let collection = [];
     let collectionLoaded = false;
@@ -109,11 +109,11 @@
             document.getElementById(`output-${category}`).value = score;
             input.style.setProperty("--range-progress", `${((score - 1) / 19) * 100}%`);
         }
-        document.getElementById("rating-total").value = total;
+        document.getElementById("review-total").value = total;
     }
 
     function scoreDisplay(total) {
-        const score = element("div", "rating-score", total);
+        const score = element("div", "review-score", total);
         score.append(element("small", "", " / 100"));
         return score;
     }
@@ -128,51 +128,51 @@
         return chips;
     }
 
-    function loadRatingIntoForm(rating) {
-        document.getElementById("rating-restaurant-id").value = rating.restaurant_id;
+    function loadReviewIntoForm(review) {
+        document.getElementById("review-restaurant-id").value = review.restaurant_id;
         for (const category of categories) {
-            document.getElementById(`score-${category}`).value = rating.scores[category];
+            document.getElementById(`score-${category}`).value = review.scores[category];
         }
         updateScorePreview();
-        ratingForm.scrollIntoView({ block: "center", behavior: "auto" });
-        document.getElementById("rating-restaurant-id").focus({ preventScroll: true });
-        showStatus(`Loaded your rating for restaurant #${rating.restaurant_id}. Adjust the scores and save to update it.`);
+        reviewForm.scrollIntoView({ block: "center", behavior: "auto" });
+        document.getElementById("review-restaurant-id").focus({ preventScroll: true });
+        showStatus(`Loaded your review for restaurant #${review.restaurant_id}. Adjust the scores and save to update it.`);
     }
 
     function renderCollection() {
         document.getElementById("stat-count").textContent = collection.length;
         document.getElementById("stat-average").textContent = collection.length
-            ? (collection.reduce((sum, rating) => sum + rating.your_total, 0) / collection.length).toFixed(1) : "—";
+            ? (collection.reduce((sum, review) => sum + review.your_total, 0) / collection.length).toFixed(1) : "—";
         document.getElementById("stat-best").textContent = collection.length
-            ? collection.reduce((best, rating) => Math.max(best, rating.your_total), 0) : "—";
+            ? collection.reduce((best, review) => Math.max(best, review.your_total), 0) : "—";
         if (!collection.length) {
-            emptyState(myRatings, "Your first impression awaits", "Rate a restaurant and it will appear in your collection.");
+            emptyState(myReviews, "Your first impression awaits", "Review a restaurant and it will appear in your collection.");
             return;
         }
-        const cards = collection.map((rating) => {
-            const card = element("article", "rating-card");
-            const header = element("div", "rating-card-header");
-            const title = element("div", "rating-card-title");
+        const cards = collection.map((review) => {
+            const card = element("article", "review-card");
+            const header = element("div", "review-card-header");
+            const title = element("div", "review-card-title");
             const mark = element("span", "restaurant-mark", "r.");
             mark.setAttribute("aria-hidden", "true");
-            title.append(mark, element("h3", "", `Restaurant #${rating.restaurant_id}`));
-            header.append(title, scoreDisplay(rating.your_total));
+            title.append(mark, element("h3", "", `Restaurant #${review.restaurant_id}`));
+            header.append(title, scoreDisplay(review.your_total));
             const actions = element("div", "card-actions");
-            const edit = element("button", "text-link", "Edit rating");
+            const edit = element("button", "text-link", "Edit review");
             edit.type = "button";
-            edit.addEventListener("click", () => loadRatingIntoForm(rating));
-            const view = element("button", "text-link", "See all ratings ↗");
+            edit.addEventListener("click", () => loadReviewIntoForm(review));
+            const view = element("button", "text-link", "See all reviews ↗");
             view.type = "button";
             view.addEventListener("click", () => {
-                document.getElementById("lookup-restaurant-id").value = rating.restaurant_id;
+                document.getElementById("lookup-restaurant-id").value = review.restaurant_id;
                 lookupForm.scrollIntoView({ block: "center", behavior: "auto" });
-                loadRestaurant(rating.restaurant_id);
+                loadRestaurant(review.restaurant_id);
             });
             actions.append(edit, view);
-            card.append(header, scoreChips(rating.scores), actions);
+            card.append(header, scoreChips(review.scores), actions);
             return card;
         });
-        myRatings.replaceChildren(...cards);
+        myReviews.replaceChildren(...cards);
     }
 
     async function loadCollection() {
@@ -180,20 +180,20 @@
         const controller = new AbortController();
         collectionRequest = controller;
         refreshButton.disabled = true;
-        myRatings.setAttribute("aria-busy", "true");
+        myReviews.setAttribute("aria-busy", "true");
         try {
-            collection = await apiRequest(app.dataset.myRatingsUrl, { signal: controller.signal });
+            collection = await apiRequest(app.dataset.myReviewsUrl, { signal: controller.signal });
             renderCollection();
             collectionLoaded = true;
         } catch (error) {
             if (error.name !== "AbortError") {
                 showStatus(error.message, true);
-                if (!collectionLoaded) emptyState(myRatings, "Couldn’t load your collection", "Use the refresh button to try again.");
+                if (!collectionLoaded) emptyState(myReviews, "Couldn’t load your collection", "Use the refresh button to try again.");
             }
         } finally {
             if (collectionRequest === controller) {
                 refreshButton.disabled = false;
-                myRatings.setAttribute("aria-busy", "false");
+                myReviews.setAttribute("aria-busy", "false");
             }
         }
     }
@@ -205,34 +205,34 @@
         selectedRestaurant = id;
         lookupButton.disabled = true;
         lookupButton.textContent = "Loading…";
-        restaurantRatings.setAttribute("aria-busy", "true");
-        restaurantRatings.replaceChildren(element("p", "input-help", `Loading ratings for restaurant #${id}…`));
+        restaurantReviews.setAttribute("aria-busy", "true");
+        restaurantReviews.replaceChildren(element("p", "input-help", `Loading reviews for restaurant #${id}…`));
         try {
-            const ratings = await apiRequest(restaurantUrl(app.dataset.restaurantRatingsUrl, id), { signal: controller.signal });
-            if (!ratings.length) {
-                emptyState(restaurantRatings, `No ratings for restaurant #${id}`, "Be the first to leave an impression. Rate this ID on the left.");
+            const reviews = await apiRequest(restaurantUrl(app.dataset.restaurantReviewsUrl, id), { signal: controller.signal });
+            if (!reviews.length) {
+                emptyState(restaurantReviews, `No reviews for restaurant #${id}`, "Be the first to leave an impression. Review this ID on the left.");
                 return;
             }
             const summary = element("div", "lookup-summary");
             const title = element("div");
-            title.append(element("h3", "", `Restaurant #${id}`), element("p", "", `${ratings.length} rating${ratings.length === 1 ? "" : "s"} · Average score`));
-            const average = ratings.reduce((sum, rating) => sum + rating.total, 0) / ratings.length;
+            title.append(element("h3", "", `Restaurant #${id}`), element("p", "", `${reviews.length} review${reviews.length === 1 ? "" : "s"} · Average score`));
+            const average = reviews.reduce((sum, review) => sum + review.total, 0) / reviews.length;
             summary.append(title, scoreDisplay(average.toFixed(1)));
             const list = element("div", "community-list");
-            ratings.forEach((rating, index) => {
-                const card = element("article", "rating-card");
-                const header = element("div", "rating-card-header");
-                header.append(element("h3", "", `Rating ${index + 1}`), scoreDisplay(rating.total));
-                card.append(header, scoreChips(rating.scores));
+            reviews.forEach((review, index) => {
+                const card = element("article", "review-card");
+                const header = element("div", "review-card-header");
+                header.append(element("h3", "", `Review ${index + 1}`), scoreDisplay(review.total));
+                card.append(header, scoreChips(review.scores));
                 list.append(card);
             });
-            restaurantRatings.replaceChildren(summary, list);
+            restaurantReviews.replaceChildren(summary, list);
         } catch (error) {
             if (error.name !== "AbortError") {
                 if (error.status === 404) {
-                    emptyState(restaurantRatings, "Restaurant not found", "Check the ID, or add a restaurant first using the Add restaurant form.");
+                    emptyState(restaurantReviews, "Restaurant not found", "Check the ID, or add a restaurant first using the Add restaurant form.");
                 } else {
-                    emptyState(restaurantRatings, "Couldn’t load restaurant ratings", "Try the lookup again when the backend is available.");
+                    emptyState(restaurantReviews, "Couldn’t load restaurant reviews", "Try the lookup again when the backend is available.");
                 }
                 showStatus(error.message, true);
             }
@@ -240,7 +240,7 @@
             if (lookupRequest === controller) {
                 lookupButton.disabled = false;
                 lookupButton.textContent = "Look up";
-                restaurantRatings.setAttribute("aria-busy", "false");
+                restaurantReviews.setAttribute("aria-busy", "false");
             }
         }
     }
@@ -248,7 +248,7 @@
     for (const category of categories) {
         document.getElementById(`score-${category}`).addEventListener("input", updateScorePreview);
     }
-    for (const id of ["rating-restaurant-id", "lookup-restaurant-id"]) {
+    for (const id of ["review-restaurant-id", "lookup-restaurant-id"]) {
         document.getElementById(id).addEventListener("input", (event) => event.target.setCustomValidity(""));
     }
     updateScorePreview();
@@ -283,14 +283,14 @@
                 },
                 body: JSON.stringify(details),
             });
-            const message = `Added ${restaurant.name} in ${restaurant.city}, ${restaurant.country} — restaurant #${restaurant.id}. Its ID is ready in the rating form. Choose your scores and save your rating.`;
+            const message = `Added ${restaurant.name} in ${restaurant.city}, ${restaurant.country} — restaurant #${restaurant.id}. Its ID is ready in the review form. Choose your scores and save your review.`;
             addRestaurantResult.textContent = message;
             showStatus(message);
             for (const input of Object.values(restaurantFields)) input.value = "";
-            const idInput = document.getElementById("rating-restaurant-id");
+            const idInput = document.getElementById("review-restaurant-id");
             idInput.setCustomValidity("");
             idInput.value = restaurant.id;
-            ratingForm.scrollIntoView({ block: "center", behavior: "auto" });
+            reviewForm.scrollIntoView({ block: "center", behavior: "auto" });
             idInput.focus({ preventScroll: true });
         } catch (error) {
             addRestaurantResult.textContent = error.message;
@@ -315,17 +315,17 @@
         }
     });
 
-    ratingForm.addEventListener("submit", async (event) => {
+    reviewForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (saveButton.disabled) return;
-        const id = restaurantId(document.getElementById("rating-restaurant-id"));
+        const id = restaurantId(document.getElementById("review-restaurant-id"));
         if (id === null) return;
         const scores = Object.fromEntries(categories.map((category) => [category, Number(document.getElementById(`score-${category}`).value)]));
         saveButton.disabled = true;
         saveButton.textContent = "Saving…";
         status.hidden = true;
         try {
-            const rating = await apiRequest(restaurantUrl(app.dataset.submitRatingUrl, id), {
+            const review = await apiRequest(restaurantUrl(app.dataset.submitReviewUrl, id), {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -333,14 +333,14 @@
                 },
                 body: JSON.stringify(scores),
             });
-            showStatus(`Saved your rating for restaurant #${id}: ${rating.your_total}/100.`);
+            showStatus(`Saved your review for restaurant #${id}: ${review.your_total}/100.`);
             await loadCollection();
             if (selectedRestaurant === id) await loadRestaurant(id);
         } catch (error) {
             showStatus(error.message, true);
         } finally {
             saveButton.disabled = false;
-            saveButton.textContent = "Save my rating →";
+            saveButton.textContent = "Save my review →";
         }
     });
 

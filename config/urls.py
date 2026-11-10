@@ -17,35 +17,39 @@ Including another URLconf
 from django.contrib import admin
 from django.contrib.auth.views import LoginView, LogoutView
 from django.urls import include, path
+from django.views.generic import TemplateView
 
-from ratings.views import (
+from reviews.views import (
     add_restaurant, home, list_all_reviews, list_my_reviews, submit_review,
-    list_restaurants, get_restaurants,
+    get_restaurants,
 )
 
 urlpatterns = [
     path('', home, name='home'),
     path(
+        'restaurants/',
+        TemplateView.as_view(template_name='reviews/restaurants.html'),
+        name='restaurants',
+    ),
+    path(
         'login/',
-        LoginView.as_view(template_name='ratings/login.html', next_page='home'),
+        LoginView.as_view(template_name='reviews/login.html', next_page='home'),
         name='login',
     ),
     path('logout/', LogoutView.as_view(next_page='home'), name='logout'),
     path('admin/', admin.site.urls),
     path('api-auth/', include('rest_framework.urls')),
-    # Keep the existing public URLs and route names for compatibility.
-    path('api/me/ratings/', list_my_reviews, name='my-ratings'),
+    path('api/me/reviews/', list_my_reviews, name='my-reviews'),
     path('api/restaurants/', add_restaurant, name='add-restaurant'),
-    path('api/restaurants/list/', list_restaurants, name='list-restaurants'),
     path('api/restaurants/get/', get_restaurants, name='get-restaurants'),
     path(
-        'api/restaurants/<int:restaurant_id>/ratings/all/',
+        'api/restaurants/<int:restaurant_id>/reviews/all/',
         list_all_reviews,
-        name='list-all-ratings',
+        name='list-all-reviews',
     ),
     path(
-        'api/restaurants/<int:restaurant_id>/submit-rating/',
+        'api/restaurants/<int:restaurant_id>/submit-review/',
         submit_review,
-        name='submit-rating',
+        name='submit-review',
     ),
 ]

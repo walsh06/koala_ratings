@@ -1,0 +1,80 @@
+{% extends 'reviews/base.html' %}
+{% load static %}
+
+{% block title %}Restaurant explorer · Koala{% endblock %}
+
+{% block content %}
+<div id="restaurants-app"
+     data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}"
+     data-restaurants-url="{% url 'get-restaurants' %}">
+    <section class="hero" aria-labelledby="explorer-title">
+        <div>
+            <p class="eyebrow">A little look around</p>
+            <h1 id="explorer-title">Find a place.<br><em>Try the API.</em></h1>
+            <p class="hero-description">Explore real restaurants and their community scores.<br class="desktop-break"> Set your filters, send a GET request, and inspect the response.</p>
+        </div>
+        <div class="hero-stamp" aria-hidden="true">
+            <span class="stamp-star">↗</span>
+            <span>Real places.<br>Real responses.</span>
+            <span class="stamp-bottom">GET / READ ONLY</span>
+        </div>
+    </section>
+
+    {% if not user.is_authenticated %}
+    <aside class="sign-in-notice">
+        <div><strong>A seat at the table first.</strong><p>Sign in with a local Django account to try the restaurant API.</p></div>
+        <a class="button" href="{% url 'login' %}?next={{ request.path|urlencode }}">Sign in to explore <span aria-hidden="true">→</span></a>
+    </aside>
+    {% endif %}
+    <noscript><p class="notice notice-error">Enable JavaScript to try the restaurant API.</p></noscript>
+    <div id="restaurants-status" class="notice" role="status" aria-live="polite" hidden></div>
+
+    <div class="explorer-grid">
+        <section class="panel explorer-filters" aria-labelledby="filters-title">
+            <div class="section-heading">
+                <div><p class="eyebrow">01 / The request</p><h2 id="filters-title">Choose your filters</h2></div>
+            </div>
+            <p class="section-description">All fields are optional. Leave them blank to request every restaurant.</p>
+            <form id="restaurants-form">
+                <fieldset {% if not user.is_authenticated %}disabled{% endif %}>
+                    <legend class="sr-only">Restaurant query parameters</legend>
+                    <label class="input-label" for="filter-city">City</label>
+                    <input id="filter-city" name="city" type="text" autocomplete="address-level2" placeholder="e.g. Dublin" aria-describedby="location-help">
+                    <label class="input-label location-label" for="filter-country">Country</label>
+                    <input id="filter-country" name="country" type="text" autocomplete="country-name" placeholder="e.g. Ireland" aria-describedby="location-help">
+                    <p id="location-help" class="input-help">Locations must match the stored names exactly. Both filters apply together.</p>
+                    <label class="input-label location-label" for="filter-count">Count</label>
+                    <input id="filter-count" name="count" type="number" min="0" max="9007199254740991" step="1" placeholder="No limit" aria-describedby="count-help">
+                    <p id="count-help" class="input-help">Maximum results to return. Blank means no limit; 0 returns an empty list.</p>
+                    <div class="explorer-actions">
+                        <button id="get-restaurants" class="button button-wide" type="submit">Get restaurants <span aria-hidden="true">→</span></button>
+                        <button class="text-link" type="reset">Clear filters</button>
+                    </div>
+                </fieldset>
+            </form>
+            <div class="request-preview">
+                <span class="eyebrow">Request preview · GET</span>
+                <a id="restaurants-request-url" href="{% url 'get-restaurants' %}" target="_blank" rel="noopener">{% url 'get-restaurants' %}</a>
+                <p class="input-help">Blank fields are omitted. This request never changes your data.</p>
+            </div>
+        </section>
+
+        <section class="panel explorer-response" aria-labelledby="results-title">
+            <div class="section-heading">
+                <div><p class="eyebrow">02 / The response</p><h2 id="results-title">Around the table</h2></div>
+                <span id="restaurants-result-count" class="result-count" hidden></span>
+            </div>
+            <p id="restaurants-response-meta" class="section-description" role="status" aria-live="polite">No request sent yet.</p>
+            <div id="restaurants-results" class="restaurant-results" aria-busy="false">
+                <div class="empty-state"><span aria-hidden="true">↗</span><h3>Ready when you are</h3><p>{% if user.is_authenticated %}Choose your filters and get restaurants. Only real API data appears here.{% else %}Sign in to send a request and see the results here.{% endif %}</p></div>
+            </div>
+            <details id="restaurants-raw-response" class="raw-response">
+                <summary>Raw response body</summary>
+                <pre id="restaurants-response-body" tabindex="0" aria-label="Raw API response">Send a request to inspect its response body.</pre>
+            </details>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="{% static 'reviews/restaurants.js' %}" defer></script>{% endblock %}

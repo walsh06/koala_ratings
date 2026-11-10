@@ -18,7 +18,7 @@ def get_koalas(score):
 def home(request):
     return render(
         request,
-        'ratings/home.html',
+        'reviews/home.html',
         {
             'categories': [
                 ('food', 'Food', 'Every bite counts.'),
@@ -45,13 +45,6 @@ def add_restaurant(request):
     serializer.is_valid(raise_exception=True)
     serializer.save()
     return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def list_restaurants(request):
-    restaurants = Restaurant.objects.all().order_by('name')
-    serializer = RestaurantSerializer(restaurants, many=True)
-    return Response(serializer.data, status=status.HTTP_200_OK)
 
 def _get_restaurant(restaurant_id):
     # Avoid overflowing the signed 64-bit primary key in database adapters.
@@ -87,7 +80,6 @@ def list_my_reviews(request):
         )
     return Response(results, status=status.HTTP_200_OK)
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def list_all_reviews(request, restaurant_id):
@@ -108,6 +100,8 @@ def list_all_reviews(request, restaurant_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_restaurants(request):
+
+    # filter on restaurant details.
     filters = {}
     if 'city' in request.query_params:
         filters['city'] = request.query_params['city']
@@ -126,8 +120,40 @@ def get_restaurants(request):
             vibes_avg=Avg('vibes'),
             value_avg=Avg('value')
         )
-        total_average = sum(average_score.values()) / len(average_score) if total_reviews > 0 else 0
+
+        total_average = sum(average_score.values()) if total_reviews > 0 else 0
         koalas = get_koalas(total_average)
+
+        # filter results based on scores
+        if 'food' in request.query_params:
+            food_request = float(request.query_params['food'])
+            if average_score['food_avg'] < food_request:
+                continue
+        if 'drink' in request.query_params:
+            drink_request = float(request.query_params['drink'])
+            if average_score['drink_avg'] < drink_request:
+                continue
+        if 'service' in request.query_params:
+            service_request = float(request.query_params['service'])
+            if average_score['service_avg'] < service_request:
+                continue
+        if 'vibes' in request.query_params:
+            vibes_request = float(request.query_params['vibes'])
+            if average_score['vibes_avg'] < vibes_request:
+                continue
+        if 'value' in request.query_params:
+            value_request = float(request.query_params['value'])
+            if average_score['value_avg'] < value_request:
+                continue
+        if 'total' in request.query_params:
+            total_request = float(request.query_params['total'])
+            if total_average < total_request:
+                continue
+        if 'koalas' in request.query_params:
+            koalas_request = float(request.query_params['koalas'])
+            if koalas < koalas_request:
+                continue
+
         results.append(
             {
                 'id': restaurant.id,
@@ -140,6 +166,9 @@ def get_restaurants(request):
                 'koalas': koalas,
             }
         )
+
+    # sort results and filter by count
+    results.sort(key=lambda x: x['total_average'], reverse=True)
     if 'count' in request.query_params:
         try:
             count = int(request.query_params['count'])

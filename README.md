@@ -1,35 +1,45 @@
-# Koala restaurant ratings
+# Koala restaurant reviews
 
 A local Django REST Framework prototype with a Django-served HTML/CSS/JavaScript
 frontend. Each of the five categories accepts
 whole-number scores from 1 to 20. The user's total is their sum, from 5 to 100.
 
-The endpoint validates and saves ratings to SQLite against the signed-in user and
-restaurant ID. Posting again for the same user and restaurant updates that rating.
-Restaurants have a database-generated ID, a name, a country, and a city. Rating saves and updates
+The endpoint validates and saves reviews to SQLite against the signed-in user and
+restaurant ID. Posting again for the same user and restaurant updates that review.
+Restaurants have a database-generated ID, a name, a country, and a city. Review saves and updates
 require an existing restaurant, with a foreign key enforcing this in the database.
-Restaurant averages are calculated in the frontend, not the backend.
+The review lookup calculates averages in the browser; the restaurant directory
+API returns server-calculated averages and koala scores.
 PostgreSQL/PostGIS and Entra authentication are not configured.
 
 ## Local setup
 
 **Migration warning:** the restaurant migration deletes all existing prototype
-ratings, as agreed, before introducing restaurant foreign keys. It leaves user
+reviews, as agreed, before introducing restaurant foreign keys. It leaves user
 accounts, sessions, and unrelated data intact and does not create placeholder
 restaurants. Back up your SQLite database before applying it. Reversing the
-migration does not restore deleted ratings. This applies once when upgrading
+migration does not restore deleted reviews. This applies once when upgrading
 from the original schema; new installations simply start empty.
 
-The subsequent location migration preserves all restaurants and ratings. Existing
+The subsequent location migration preserves all restaurants and reviews. Existing
 restaurants receive empty country/city fields because their locations are unknown;
 these can be filled through the Django ORM. New API creations require both fields.
 
-The review migration renames the Python model to `Review` and the database table
-to `ratings_review`, preserving existing scores, timestamps, restaurant links,
-and accounts. The serializer and view functions use review terminology too.
-The Django app remains `ratings`, and existing API URLs and route names are
-unchanged for compatibility. Previously applied migrations retain their
-historical model names; run `manage.py migrate` when updating an existing database.
+The model rename to `Review` preserves existing scores, timestamps, restaurant
+links, and accounts. The entire Django app/package is now `reviews`, including
+its templates, static assets, and tests. Its app label and migration namespace
+have also been rebased to `reviews`. The database tables are `reviews_review`
+and `reviews_restaurant`. The serializer, view functions, and all UI copy use
+review terminology too.
+
+This is a development-only breaking rename: public API URLs and route names now
+use review terminology, with no compatibility aliases. Historical model names
+remain only in migrations and migration tests. The local SQLite database has
+already been backed up and relabeled to the new app namespace, preserving its
+existing data. Fresh installations use the normal `manage.py migrate` command.
+Other databases still using the old app namespace need a backup followed by
+either reinitialization or an explicit app-namespace migration; running
+`manage.py migrate` alone does not convert an old namespace.
 
 Run these commands in PowerShell from this folder:
 
@@ -51,14 +61,20 @@ With Django running, open **http://127.0.0.1:8000/** and choose **Sign in**.
 Use the local account created above. The frontend lets you:
 
 - Enter a name, country, and city in **Add a restaurant**. The returned ID is filled into the
-  rating form; creation does not save a rating or reset your score sliders.
-- Load and refresh your saved ratings, including your count, average, and best score.
+  review form; creation does not save a review or reset your score sliders.
+- Load and refresh your saved reviews, including your count, average, and best score.
 - Enter an existing restaurant ID and set five scores with sliders. The total
-  updates as you move them; **Save my rating** persists the scores through the API.
-- Choose **Edit rating** to load a saved rating back into the form.
-- Look up all ratings for an ID, or choose **See all ratings** on a saved rating.
+  updates as you move them; **Save my review** persists the scores through the API.
+- Choose **Edit review** to load a saved review back into the form.
+- Look up all reviews for an ID, or choose **See all reviews** on a saved review.
   The displayed restaurant average is calculated in the browser from the returned
-  ratings; it is not a new backend endpoint.
+  reviews; it is not a new backend endpoint.
+- Choose **Restaurant explorer** or open **http://127.0.0.1:8000/restaurants/**
+  to try the restaurant directory API. Enter optional city, country, and count
+  filters, inspect the generated GET URL, and choose **Get restaurants**. Results
+  show names, locations, review counts, category averages, total averages, and
+  koalas. Expand **Raw response body** to inspect the JSON; the response summary
+  includes its HTTP status, elapsed time, and requested URL.
 - Sign out safely using a CSRF-protected POST.
 
 No Node.js installation, frontend build, separate frontend server, or CORS setup
@@ -69,9 +85,9 @@ the same hostname while signing in and using the app; `localhost` and
 `127.0.0.1` have separate cookies.
 
 The UI shows loading, empty, validation, session-expiry, and connection-error
-states. It uses real API responses, not sample ratings. Restaurant names are
-stored on creation, but no searchable directory exists yet and rating cards
-still identify restaurants by numeric ID.
+states. It uses real API responses, not sample reviews. The restaurant explorer
+shows stored names; review cards on the home page still identify restaurants by
+numeric ID. The explorer is read-only and uses your existing signed-in session.
 
 ## VS Code
 
@@ -83,7 +99,7 @@ For normal development, choose **Terminal → Run Task → Run Koala locally**.
 This starts Django at http://127.0.0.1:8000/ with automatic reloading.
 
 Choose **Debug Django** in Run and Debug, then press F5. Set breakpoints in
-`ratings\views.py`. The debugger disables automatic reloading; restart it after
+`reviews/views.py`. The debugger disables automatic reloading; restart it after
 editing Python files. Stop debugging with Shift+F5.
 
 ## Add a restaurant
@@ -93,7 +109,7 @@ containing `name`, `country`, and `city`, for example
 `{"name": "The Green Table", "country": "United Kingdom", "city": "London"}`.
 The response is **HTTP 201 Created**, for example
 `{"id": 1, "name": "The Green Table", "country": "United Kingdom", "city": "London"}`.
-Use the returned ID for rating saves and lookups.
+Use the returned ID for review saves and lookups.
 
 Any authenticated user can create a restaurant. All three fields are required,
 trimmed, and must be nonblank. Names have a maximum of 200 characters; country
@@ -101,19 +117,38 @@ and city each have a maximum of 100. Missing or invalid fields return HTTP 400
 with field-specific errors. Locations are free-text names, not country codes
 or a validated geographical directory. Duplicate names are allowed.
 The ID is read-only; sending an `id` cannot choose the primary key. Creation
-does not submit a rating. This endpoint supports POST only; no restaurant
-list, search, edit, or delete API is provided.
+does not submit a review. This endpoint supports POST only; the separate GET
+endpoint below lists restaurants. No edit or delete API is provided.
 
 Session-authenticated requests must send a CSRF token, as the built-in form does.
 Anonymous requests return HTTP 403 with the current authentication defaults.
 
-## Submit a rating
+## Get restaurants
+
+After signing in, GET http://127.0.0.1:8000/api/restaurants/get/ (route name
+`get-restaurants`). Optional `city` and `country` query parameters filter by
+stored location names, and both apply when supplied together. Optional `count`
+limits the returned list, for example
+http://127.0.0.1:8000/api/restaurants/get/?country=Ireland&count=10.
+The frontend omits blank filters and offers nonnegative whole-number counts;
+0 returns no results. The existing API ignores an invalid integer count and
+uses Python slicing for negative counts, omitting that many trailing results.
+
+Each restaurant includes `id`, `name`, `city`, `country`, `total_reviews`,
+`average_score` (the five `food_avg`, `drink_avg`, `service_avg`, `vibes_avg`,
+and `value_avg` values), `total_average`, and `koalas`. Restaurants without
+reviews have null category averages, a total of 0, and 0 koalas; the frontend
+shows a dash for unreviewed scores. No matches return `[]`. Anonymous API
+requests return HTTP 403. Use the **Restaurant explorer** page to test this
+endpoint without changing any data.
+
+## Submit a review
 
 1. Sign in at http://127.0.0.1:8000/api-auth/login/.
 2. Add a restaurant first using the frontend or the creation API above.
-3. Open `/api/restaurants/<returned-id>/submit-rating/` on the local server.
+3. Open `/api/restaurants/<returned-id>/submit-review/` on the local server.
   For an existing ID of 42 this is
-  http://127.0.0.1:8000/api/restaurants/42/submit-rating/.
+  http://127.0.0.1:8000/api/restaurants/42/submit-review/.
 4. The initial GET returns 405 because the endpoint only accepts POST.
    In the browsable API's POST form, select `application/json` and submit:
 
@@ -127,33 +162,34 @@ Anonymous requests return HTTP 403 with the current authentication defaults.
 }
 ```
 
-The response contains `your_total: 85`. Missing categories, scores below 1 or
+The route name is `submit-review`. The response contains `your_total: 85`.
+Missing categories, scores below 1 or
 above 20, and fractional scores return HTTP 400.
 An unknown restaurant ID returns HTTP 404 with
 `{"detail": "Restaurant not found."}` before any score validation or write.
-This applies to updates as well as new ratings and never creates restaurants
+This applies to updates as well as new reviews and never creates restaurants
 automatically. The example ID 42 must exist; use your actual returned ID.
 
-Saved reviews are in the `ratings_review` table in `db.sqlite3`, including the
+Saved reviews are in the `reviews_review` table in `db.sqlite3`, including the
 user ID, restaurant ID, all five scores, and creation/update timestamps. The
 total is calculated from the scores rather than stored separately. Database
-constraints enforce score bounds, an existing restaurant, and one rating per
+constraints enforce score bounds, an existing restaurant, and one review per
 user per restaurant. Referenced restaurants are protected from deletion.
-Both new ratings and updates return HTTP 200 with the existing response format.
+Both new reviews and updates return HTTP 200 with the existing response format.
 
 Django REST Framework's default session and basic authentication are used for
 local testing. The built-in frontend uses the session and sends a CSRF token
 with its POST requests. Its sign-in page redirects to the frontend; the existing
-API sign-in page still defaults to your ratings JSON.
+API sign-in page still defaults to your reviews JSON.
 Entra bearer tokens are not supported by this prototype. Cross-origin frontend
 access is not configured.
 
-## Get your ratings
+## Get your reviews
 
-After signing in, open http://127.0.0.1:8000/api/me/ratings/ or send a GET
+After signing in, open http://127.0.0.1:8000/api/me/reviews/ or send a GET
 request to that URL using your authenticated session. The response is a JSON
-array containing only the signed-in user's saved ratings, ordered by restaurant
-ID:
+array containing only the signed-in user's saved reviews, ordered by restaurant
+ID. The route name is `my-reviews`:
 
 ```json
 [
@@ -171,33 +207,34 @@ ID:
 ]
 ```
 
-Users with no ratings receive `[]`. The endpoint returns all their ratings
+Users with no reviews receive `[]`. The endpoint returns all their reviews
 without pagination. A user ID cannot be selected through query parameters;
-the authenticated identity determines whose ratings are returned.
+the authenticated identity determines whose reviews are returned.
 
-## Get restaurant ratings
+## Get restaurant reviews
 
 After signing in, GET
-http://127.0.0.1:8000/api/restaurants/42/ratings/all/ to retrieve all users'
-ratings for that ID. Each entry includes `restaurant_id`, `scores`, and `total`.
-User identities are not included. An existing restaurant with no ratings returns
+http://127.0.0.1:8000/api/restaurants/42/reviews/all/ to retrieve all users'
+reviews for that ID. The route name is `list-all-reviews`. Each entry includes
+`restaurant_id`, `scores`, and `total`.
+User identities are not included. An existing restaurant with no reviews returns
 `[]`; an unknown restaurant returns HTTP 404. Use the ID returned by creation
 rather than assuming the example ID 42 exists.
 
 ## Tests
 
 ```powershell
-.\.venv\Scripts\python.exe manage.py test ratings
+.\.venv\Scripts\python.exe manage.py test reviews
 .\.venv\Scripts\python.exe manage.py check
 ```
 
-Alternatively choose **Debug rating tests** and press F5. Tests use a separate
+Alternatively choose **Debug review tests** and press F5. Tests use a separate
 temporary database and cover scoring, persistence, updates, database constraints,
-required categories, listing only the current user's ratings, restaurant lookups,
+required categories, listing only the current user's reviews, restaurant lookups,
 frontend templates, sign-in redirects, and session-authenticated POSTs with
 enforced CSRF checks. They do not automate JavaScript or test Entra.
 They also cover restaurant creation, missing-ID rejection, foreign key and
-deletion protection, and migration from the old schema with prototype-rating
+deletion protection, and migration from the old schema with prototype-review
 deletion and preservation of user accounts.
 
 ## Development only

@@ -2,7 +2,7 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    dependencies = [('ratings', '0002_restaurant')]
+    dependencies = [('reviews', '0002_restaurant')]
 
     operations = [
         migrations.AddField(
